@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>유랑기록실</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<title>Scroll:Don</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700;800&family=Special+Elite&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #f7f3f0;
@@ -84,6 +84,9 @@
   }
   .logo { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
   .logo span { color: var(--accent); }
+  .brand { font-family: "Special Elite", "Courier New", monospace; font-size: 24px; letter-spacing: 2px; font-weight: 400; }
+  .brand .b-colon { color: var(--accent); }
+  .brand .b-don { border-bottom: 2px solid var(--accent); padding-bottom: 1px; }
   .header-right { display: flex; align-items: center; gap: 12px; }
   .sync-dot {
     width: 8px; height: 8px; border-radius: 50%;
@@ -234,13 +237,15 @@
   }
   .card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(155,58,58,0.12); }
   .card:hover::before { opacity: 1; }
+  .card.dragging { opacity: 0.4; transform: scale(0.98); }
+  .card.drag-over { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(155,58,58,0.25); }
 
   .card-image { width: 100%; height: 140px; object-fit: cover; display: block; }
   .card-body { padding: 14px; }
-  .card-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 24px; }
+  .card-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 24px; }
   .card-preview {
-    font-family: 'JetBrains Mono', monospace; font-size: 11px;
-    color: var(--muted); line-height: 1.6;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--muted); line-height: 1.7;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden; word-break: break-all;
   }
@@ -259,8 +264,6 @@
     transition: color 0.15s, background 0.15s;
   }
   .btn-icon:hover { color: var(--danger); }
-  .btn-icon.disabled { opacity: 0.25; cursor: default; }
-  .btn-icon.disabled:hover { color: var(--muted); }
 
   .copy-flash {
     position: absolute; inset: 0; background: rgba(155,58,58,0.1);
@@ -334,7 +337,7 @@
 <body>
 
 <div id="setupScreen">
-  <h2>유랑<span>기록실</span> 설정</h2>
+  <h2><span class="brand">Scroll<span class="b-colon">:</span><span class="b-don">Don</span></span> 설정</h2>
   <p>Firebase를 연결하면 어느 기기에서도 같은 항목을 쓸 수 있어요.<br>아래 순서대로 따라해주세요.</p>
   <div class="setup-step"><strong>1단계</strong> — <a href="https://console.firebase.google.com/" target="_blank">console.firebase.google.com</a> 접속 후 구글 로그인</div>
   <div class="setup-step"><strong>2단계</strong> — "프로젝트 만들기" → 이름 입력 → Analytics 끄고 완료</div>
@@ -352,7 +355,7 @@
 
 <div id="app">
   <div class="app-header">
-    <div class="logo">유랑<span>기록실</span></div>
+    <div class="logo brand">Scroll<span class="b-colon">:</span><span class="b-don">Don</span></div>
     <div class="header-right">
       <div class="sync-dot" id="syncDot" title="동기화 상태"></div>
       <button class="btn-reset" onclick="resetConfig()">연결 해제</button>
@@ -599,20 +602,42 @@
     renderCards();
   }
 
-  window.moveItemUp = async function(id, e) {
-    e.stopPropagation();
-    const list = getVisibleItems();
-    const idx = list.findIndex(i => i.id === id);
-    if (idx <= 0) return;
-    await swapOrder(list[idx], list[idx - 1]);
+  let dragId = null;
+  window.dragStart = function(e, id) {
+    dragId = id;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', id); } catch(_) {}
+    e.currentTarget.classList.add('dragging');
   };
-  window.moveItemDown = async function(id, e) {
-    e.stopPropagation();
-    const list = getVisibleItems();
-    const idx = list.findIndex(i => i.id === id);
-    if (idx < 0 || idx >= list.length - 1) return;
-    await swapOrder(list[idx], list[idx + 1]);
+  window.dragOverCard = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const card = e.currentTarget;
+    if (card.dataset.pid !== dragId) card.classList.add('drag-over');
   };
+  window.dragLeaveCard = function(e) {
+    e.currentTarget.classList.remove('drag-over');
+  };
+  window.dropOnCard = async function(e, targetId) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll('.card.drag-over').forEach(el => el.classList.remove('drag-over'));
+    if (!dragId || dragId === targetId) { dragId = null; return; }
+    const a = items.find(i => i.id === dragId);
+    const b = items.find(i => i.id === targetId);
+    dragId = null;
+    if (!a || !b) return;
+    await swapOrder(a, b);
+  };
+  window.dragEndCard = function() {
+    document.querySelectorAll('.card.dragging, .card.drag-over').forEach(el => {
+      el.classList.remove('dragging', 'drag-over');
+    });
+    dragId = null;
+    lastDragEnd = Date.now();
+  };
+
+  let lastDragEnd = 0;
 
   window.handleImageSelect = function(e) {
     const file = e.target.files[0];
@@ -724,6 +749,7 @@
   };
 
   window.copyItem = function(id, el) {
+    if (Date.now() - lastDragEnd < 300) return;
     const item = items.find(i => i.id === id);
     if (!item) return;
     navigator.clipboard.writeText(item.content).catch(() => {
@@ -753,10 +779,12 @@
       const folderTag = item.folderId && folderMap[item.folderId]
         ? `<div class="card-folder-tag">📁 ${esc(folderMap[item.folderId])}</div>` : '';
       const imgHtml = item.image ? `<img class="card-image" src="${item.image}" alt="" />` : '';
-      const upDis = idx === 0 ? ' disabled' : '';
-      const dnDis = idx === filtered.length - 1 ? ' disabled' : '';
       return `
-        <div class="card" onclick="copyItem('${item.id}', this)">
+        <div class="card" draggable="true" data-pid="${item.id}"
+          ondragstart="dragStart(event, '${item.id}')"
+          ondragover="dragOverCard(event)" ondragleave="dragLeaveCard(event)"
+          ondrop="dropOnCard(event, '${item.id}')" ondragend="dragEndCard()"
+          onclick="copyItem('${item.id}', this)">
           ${imgHtml}
           <div class="card-body">
             ${folderTag}
@@ -764,8 +792,6 @@
             <div class="card-preview">${esc(item.content)}</div>
           </div>
           <div class="card-actions" onclick="event.stopPropagation()">
-            <div class="btn-icon${upDis}" onclick="moveItemUp('${item.id}', event)" title="위로">▲</div>
-            <div class="btn-icon${dnDis}" onclick="moveItemDown('${item.id}', event)" title="아래로">▼</div>
             <div class="btn-icon" onclick="openEditModal('${item.id}')" title="수정">✏️</div>
             <div class="btn-icon" onclick="openMoveModal('${item.id}')" title="폴더 이동">📁</div>
             <div class="btn-icon" onclick="deleteItem('${item.id}')" title="삭제">✕</div>
