@@ -259,6 +259,8 @@
     transition: color 0.15s, background 0.15s;
   }
   .btn-icon:hover { color: var(--danger); }
+  .btn-icon.disabled { opacity: 0.25; cursor: default; }
+  .btn-icon.disabled:hover { color: var(--muted); }
 
   .copy-flash {
     position: absolute; inset: 0; background: rgba(155,58,58,0.1);
@@ -552,17 +554,65 @@
   }
 
   function listenItems() {
-    const q = query(collection(db, 'prompts'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'prompts'));
     unsubItems = onSnapshot(q,
-      snap => {
+      async snap => {
         items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         setSyncDot('ok');
+        await normalizeOrder();
         renderFolders();
         renderCards();
       },
       err => { setSyncDot('offline'); console.error(err); }
     );
   }
+
+  async function normalizeOrder() {
+    if (!items.some(i => i.order === undefined)) return;
+    const sorted = [...items].sort((a, b) => {
+      const at = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+      const bt = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+      return bt - at;
+    });
+    const { writeBatch } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const batch = writeBatch(db);
+    sorted.forEach((item, idx) => { batch.update(doc(db, 'prompts', item.id), { order: idx }); });
+    await batch.commit();
+    sorted.forEach((item, idx) => { item.order = idx; });
+  }
+
+  function getVisibleItems() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    let filtered = activeFolder === null ? [...items] : items.filter(i => i.folderId === activeFolder);
+    if (q) filtered = filtered.filter(i => i.title?.toLowerCase().includes(q) || i.content?.toLowerCase().includes(q));
+    filtered.sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9));
+    return filtered;
+  }
+
+  async function swapOrder(a, b) {
+    setSyncDot('syncing');
+    const { updateDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const ao = a.order ?? 0, bo = b.order ?? 0;
+    a.order = bo; b.order = ao;
+    await updateDoc(doc(db, 'prompts', a.id), { order: bo });
+    await updateDoc(doc(db, 'prompts', b.id), { order: ao });
+    renderCards();
+  }
+
+  window.moveItemUp = async function(id, e) {
+    e.stopPropagation();
+    const list = getVisibleItems();
+    const idx = list.findIndex(i => i.id === id);
+    if (idx <= 0) return;
+    await swapOrder(list[idx], list[idx - 1]);
+  };
+  window.moveItemDown = async function(id, e) {
+    e.stopPropagation();
+    const list = getVisibleItems();
+    const idx = list.findIndex(i => i.id === id);
+    if (idx < 0 || idx >= list.length - 1) return;
+    await swapOrder(list[idx], list[idx + 1]);
+  };
 
   window.handleImageSelect = function(e) {
     const file = e.target.files[0];
@@ -607,7 +657,8 @@
     const folderId = document.getElementById('folderSelect').value;
     if (!content) return;
     setSyncDot('syncing');
-    const data = { title: title || '제목 없음', content, folderId: folderId || null, createdAt: serverTimestamp() };
+    const minOrder = items.length ? Math.min(...items.map(i => i.order ?? 0)) : 0;
+    const data = { title: title || '제목 없음', content, folderId: folderId || null, createdAt: serverTimestamp(), order: minOrder - 1 };
     if (pendingImage) data.image = pendingImage;
     await addDoc(collection(db, 'prompts'), data);
     document.getElementById('titleInput').value = '';
@@ -687,9 +738,7 @@
   };
 
   window.renderCards = function() {
-    const q = document.getElementById('searchInput').value.toLowerCase();
-    let filtered = activeFolder === null ? items : items.filter(i => i.folderId === activeFolder);
-    if (q) filtered = filtered.filter(i => i.title?.toLowerCase().includes(q) || i.content?.toLowerCase().includes(q));
+    const filtered = getVisibleItems();
 
     const folderName = activeFolder ? (folders.find(f => f.id === activeFolder)?.name || '') : '전체';
     document.getElementById('sectionTitle').textContent = folderName;
@@ -700,10 +749,12 @@
       return;
     }
     const folderMap = Object.fromEntries(folders.map(f => [f.id, f.name]));
-    container.innerHTML = filtered.map(item => {
+    container.innerHTML = filtered.map((item, idx) => {
       const folderTag = item.folderId && folderMap[item.folderId]
         ? `<div class="card-folder-tag">📁 ${esc(folderMap[item.folderId])}</div>` : '';
       const imgHtml = item.image ? `<img class="card-image" src="${item.image}" alt="" />` : '';
+      const upDis = idx === 0 ? ' disabled' : '';
+      const dnDis = idx === filtered.length - 1 ? ' disabled' : '';
       return `
         <div class="card" onclick="copyItem('${item.id}', this)">
           ${imgHtml}
@@ -713,6 +764,8 @@
             <div class="card-preview">${esc(item.content)}</div>
           </div>
           <div class="card-actions" onclick="event.stopPropagation()">
+            <div class="btn-icon${upDis}" onclick="moveItemUp('${item.id}', event)" title="위로">▲</div>
+            <div class="btn-icon${dnDis}" onclick="moveItemDown('${item.id}', event)" title="아래로">▼</div>
             <div class="btn-icon" onclick="openEditModal('${item.id}')" title="수정">✏️</div>
             <div class="btn-icon" onclick="openMoveModal('${item.id}')" title="폴더 이동">📁</div>
             <div class="btn-icon" onclick="deleteItem('${item.id}')" title="삭제">✕</div>
