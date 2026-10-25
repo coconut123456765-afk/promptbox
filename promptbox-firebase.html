@@ -697,6 +697,7 @@
     const container = document.getElementById('cards');
     if (!card || !container) return;
     const rect = card.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
     const offsetY = e.clientY - rect.top;
     const clone = card.cloneNode(true);
     clone.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + rect.top + 'px;width:' + rect.width + 'px;pointer-events:none;opacity:0.92;z-index:9999;box-shadow:0 10px 28px rgba(0,0,0,0.28);';
@@ -704,22 +705,32 @@
     card.style.visibility = 'hidden';
     let moved = false;
     const move = (ev) => {
-      if (Math.abs(ev.clientY - e.clientY) > 3) moved = true;
+      if (Math.abs(ev.clientY - e.clientY) > 3 || Math.abs(ev.clientX - e.clientX) > 3) moved = true;
+      clone.style.left = (ev.clientX - offsetX) + 'px';
       clone.style.top = (ev.clientY - offsetY) + 'px';
       const all = [...container.querySelectorAll('.card')].filter(x => x !== card);
-      const before = new Map(all.map(x => [x, x.getBoundingClientRect().top]));
-      let target = null;
+      const before = new Map(all.map(x => [x, x.getBoundingClientRect()]));
+      // Grid order (row-major): count how many cards sit before the pointer.
+      // A card counts as "before" if it is in a row above, or in the same
+      // row and left of the pointer.
+      let idx = 0;
       for (const x of all) {
         const r = x.getBoundingClientRect();
-        if (ev.clientY < r.top + r.height / 2) { target = x; break; }
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const sameRow = Math.abs(cy - ev.clientY) <= r.height / 2;
+        if (!sameRow && cy < ev.clientY) idx++;
+        else if (sameRow && cx < ev.clientX) idx++;
       }
-      if (target) { if (target !== card.nextElementSibling) container.insertBefore(card, target); }
+      const ref = all[idx];
+      if (ref) { if (ref !== card.nextElementSibling) container.insertBefore(card, ref); }
       else if (card !== container.lastElementChild) { container.appendChild(card); }
       for (const x of all) {
-        const dy = before.get(x) - x.getBoundingClientRect().top;
-        if (dy) {
+        const b = before.get(x);
+        const r = x.getBoundingClientRect();
+        const dx = b.left - r.left, dy = b.top - r.top;
+        if (dx || dy) {
           x.style.transition = 'none';
-          x.style.transform = 'translateY(' + dy + 'px)';
+          x.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
           void x.offsetHeight;
           x.style.transition = 'transform 0.18s ease';
           x.style.transform = '';
@@ -732,6 +743,7 @@
       document.removeEventListener('pointercancel', up);
       clone.remove();
       card.style.visibility = '';
+      container.querySelectorAll('.card').forEach(x => { x.style.transition = ''; x.style.transform = ''; });
       lastDragEnd = Date.now();
       if (moved) commitCardOrder();
     };
