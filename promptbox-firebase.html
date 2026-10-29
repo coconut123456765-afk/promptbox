@@ -108,6 +108,21 @@
   }
   .btn-reset:hover { color: var(--danger); border-color: var(--danger); }
 
+  /* ── Guest mode: view + click-to-copy only ── */
+  .guest-bar { display: none; align-items: center; gap: 8px; }
+  body.guest .guest-bar { display: flex; }
+  .guest-badge {
+    background: rgba(155,58,58,0.08); border: 1px solid var(--accent);
+    color: var(--accent); border-radius: 20px; padding: 5px 12px;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .guest-exit { color: var(--muted); font-size: 12px; text-decoration: none; }
+  .guest-exit:hover { color: var(--accent); text-decoration: underline; }
+  body.guest .add-box,
+  body.guest .btn-new-folder,
+  body.guest .btn-reset,
+  body.guest .card-actions { display: none !important; }
+
   .app-body { display: flex; height: calc(100vh - 65px); }
 
   /* ── Sidebar : Filing Cabinet ── */
@@ -432,6 +447,10 @@
       <div class="header-sub">CARD CATALOG</div>
     </div>
     <div class="header-right">
+      <div class="guest-bar">
+        <span class="guest-badge">게스트 · 보기 / 복사만 가능</span>
+        <a class="guest-exit" href="promptbox-firebase.html">편집 모드로 열기</a>
+      </div>
       <div class="sync-dot" id="syncDot" title="동기화 상태"></div>
       <button class="btn-reset" onclick="resetConfig()">연결 해제</button>
     </div>
@@ -521,6 +540,13 @@
   } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
   const CONFIG_KEY = 'yurang_firebase_config';
+  // Guest mode (?guest=1 or ?mode=guest): hide every edit control and
+  // block every write, so the page is view + click-to-copy only.
+  // This is a UI guard against accidental edits, not a Firestore rule:
+  // the underlying data is still readable by anyone with the config.
+  const _q = new URLSearchParams(location.search);
+  const GUEST = _q.get('guest') === '1' || _q.get('mode') === 'guest';
+  if (GUEST) document.body.classList.add('guest');
   let db, unsubItems, unsubFolders;
   let items = [], folders = [];
   let activeFolder = null;
@@ -573,6 +599,7 @@
   }
 
   window.openFolderModal = function() {
+    if (GUEST) return;
     document.getElementById('folderModal').classList.add('show');
     setTimeout(() => document.getElementById('folderNameInput').focus(), 100);
   };
@@ -581,6 +608,7 @@
     document.getElementById('folderNameInput').value = '';
   };
   window.createFolder = async function() {
+    if (GUEST) return;
     const name = document.getElementById('folderNameInput').value.trim();
     if (!name) return;
     await addDoc(collection(db, 'folders'), { name, createdAt: serverTimestamp() });
@@ -588,6 +616,7 @@
   };
   window.deleteFolder = async function(id, e) {
     e.stopPropagation();
+    if (GUEST) return;
     if (!confirm('폴더를 삭제할까요? (항목은 유지돼요)')) return;
     await deleteDoc(doc(db, 'folders', id));
     if (activeFolder === id) { activeFolder = null; renderCards(); }
@@ -643,6 +672,7 @@
   }
 
   async function normalizeOrder() {
+    if (GUEST) return;
     if (!items.some(i => i.order === undefined)) return;
     const sorted = [...items].sort((a, b) => {
       const at = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
@@ -670,6 +700,7 @@
   // to Firestore only on drop, as a permutation of the visible items'
   // existing order values (no collisions with hidden items).
   async function commitCardOrder() {
+    if (GUEST) return;
     const container = document.getElementById('cards');
     if (!container) return;
     const ids = [...container.querySelectorAll('.card')].map(el => el.dataset.pid);
@@ -690,6 +721,7 @@
   }
 
   document.getElementById('cards').addEventListener('pointerdown', e => {
+    if (GUEST) return;
     const hnd = e.target.closest('.draghandle');
     if (!hnd) return;
     e.preventDefault();
@@ -792,6 +824,7 @@
   };
 
   window.addItem = async function() {
+    if (GUEST) return;
     const title    = document.getElementById('titleInput').value.trim();
     const content  = document.getElementById('contentInput').value.trim();
     const folderId = document.getElementById('folderSelect').value;
@@ -808,6 +841,7 @@
 
   let editTargetId = null;
   window.openEditModal = function(id) {
+    if (GUEST) return;
     editTargetId = id;
     const item = items.find(i => i.id === id);
     if (!item) return;
@@ -821,6 +855,7 @@
     editTargetId = null;
   };
   window.saveEdit = async function() {
+    if (GUEST) return;
     if (!editTargetId) return;
     const title   = document.getElementById('editTitleInput').value.trim();
     const content = document.getElementById('editContentInput').value.trim();
@@ -832,12 +867,14 @@
   };
 
   window.deleteItem = async function(id) {
+    if (GUEST) return;
     setSyncDot('syncing');
     await deleteDoc(doc(db, 'prompts', id));
   };
 
   let moveTargetId = null;
   window.openMoveModal = function(id) {
+    if (GUEST) return;
     moveTargetId = id;
     const item = items.find(i => i.id === id);
     const list = document.getElementById('moveFolderList');
@@ -856,6 +893,7 @@
     moveTargetId = null;
   };
   window.moveItem = async function(folderId) {
+    if (GUEST) return;
     if (!moveTargetId) return;
     setSyncDot('syncing');
     const { updateDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
